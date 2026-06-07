@@ -114,22 +114,21 @@ python gui\window.py
 
 Manual GUI test:
 
-1. Click `Open Project`.
+1. Click `Choose Project`.
 2. Select a small test folder, not this source-code folder.
-3. Click `Initialize`.
-4. Type a snapshot message.
-5. Click `Create Snapshot`.
+3. If the folder is new to SimpleGit, click `Start Managing This Project`.
+4. Type a short message for the version.
+5. Click `Save Version`.
 6. Change or add a file inside the test folder.
-7. Create another snapshot.
-8. Select the first snapshot node in the timeline graph.
-9. Click `Restore Selected`.
-10. Confirm the restore.
+7. Save another version.
+8. In the timeline graph, click `Switch to this version` on the first version.
+9. Confirm the switch.
 
 Expected result:
 
 - the timeline graph shows `s1` and `s2`
 - the current snapshot label updates
-- restoring `s1` brings the test folder back to the first saved state
+- switching to `s1` brings the test folder back to the first saved state
 - the `.simplegit` folder remains inside the test folder
 
 ---

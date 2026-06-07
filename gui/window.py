@@ -8,14 +8,12 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 try:
-    from PyQt6.QtCore import QSize, Qt, pyqtSignal
-    from PyQt6.QtGui import QColor, QFont, QPainter, QPen
+    from PyQt6.QtCore import Qt, pyqtSignal
+    from PyQt6.QtGui import QColor, QPainter, QPen
     from PyQt6.QtWidgets import (
         QApplication,
         QFileDialog,
         QFrame,
-        QGridLayout,
-        QGroupBox,
         QHBoxLayout,
         QLabel,
         QLineEdit,
@@ -23,6 +21,7 @@ try:
         QMessageBox,
         QPushButton,
         QScrollArea,
+        QStackedWidget,
         QVBoxLayout,
         QWidget,
     )
@@ -34,120 +33,166 @@ from core.repository import Repository
 from core.snapshot import SnapshotManager
 
 
-class TimelineGraphWidget(QWidget):
-    """Clickable VS Code-like snapshot graph for the single snapshot history."""
+class GraphMarker(QWidget):
+    """Paints one node and the vertical connector line for the version graph."""
 
-    snapshot_selected = pyqtSignal(str)
+    MARKER_HEIGHT = 92
 
-    ROW_HEIGHT = 74
-    TOP_PADDING = 18
-    GRAPH_X = 34
-
-    def __init__(self):
+    def __init__(self, is_first=False, is_last=False, is_current=False):
         super().__init__()
-        self.snapshots = []
-        self.current_snapshot_id = None
-        self.selected_snapshot_id = None
-        self.setMinimumHeight(240)
-
-    def set_snapshots(self, snapshots, current_snapshot_id):
-        previous_selection = self.selected_snapshot_id
-        self.snapshots = list(reversed(snapshots))
-        self.current_snapshot_id = current_snapshot_id
-
-        snapshot_ids = [snapshot.id for snapshot in self.snapshots]
-        if previous_selection in snapshot_ids:
-            self.selected_snapshot_id = previous_selection
-        elif current_snapshot_id in snapshot_ids:
-            self.selected_snapshot_id = current_snapshot_id
-        elif snapshot_ids:
-            self.selected_snapshot_id = snapshot_ids[0]
-        else:
-            self.selected_snapshot_id = None
-
-        self.setMinimumHeight(max(240, self.TOP_PADDING * 2 + len(self.snapshots) * self.ROW_HEIGHT))
-        self.updateGeometry()
-        self.update()
-
-    def sizeHint(self):
-        height = max(240, self.TOP_PADDING * 2 + len(self.snapshots) * self.ROW_HEIGHT)
-        return QSize(760, height)
-
-    def mousePressEvent(self, event):
-        row = int((event.position().y() - self.TOP_PADDING) // self.ROW_HEIGHT)
-
-        if 0 <= row < len(self.snapshots):
-            self.selected_snapshot_id = self.snapshots[row].id
-            self.snapshot_selected.emit(self.selected_snapshot_id)
-            self.update()
+        self.is_first = is_first
+        self.is_last = is_last
+        self.is_current = is_current
+        self.setFixedWidth(72)
+        self.setFixedHeight(self.MARKER_HEIGHT)
 
     def paintEvent(self, event):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-        painter.fillRect(self.rect(), QColor("#ffffff"))
 
-        if not self.snapshots:
-            painter.setPen(QColor("#7b8794"))
-            painter.drawText(self.rect(), Qt.AlignmentFlag.AlignCenter, "No snapshots yet")
+        center_x = self.width() // 2
+        center_y = self.height() // 2
+
+        line_pen = QPen(QColor("#a7b4c2"), 2)
+        painter.setPen(line_pen)
+
+        if not self.is_first:
+            painter.drawLine(center_x, 0, center_x, center_y - 13)
+
+        if not self.is_last:
+            painter.drawLine(center_x, center_y + 13, center_x, self.height())
+
+        node_color = QColor("#2166d1") if self.is_current else QColor("#6b7d90")
+        outer_color = QColor("#bfdbfe") if self.is_current else QColor("#e2e8f0")
+
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(outer_color)
+        painter.drawEllipse(center_x - 14, center_y - 14, 28, 28)
+
+        painter.setBrush(node_color)
+        painter.drawEllipse(center_x - 8, center_y - 8, 16, 16)
+
+        painter.setPen(QPen(QColor("#ffffff"), 2))
+        painter.setBrush(node_color)
+        painter.drawEllipse(center_x - 7, center_y - 7, 14, 14)
+
+
+class VersionNode(QWidget):
+    """One visible version row in the timeline graph."""
+
+    switch_requested = pyqtSignal(str)
+
+    def __init__(self, snapshot, is_first=False, is_last=False, is_current=False):
+        super().__init__()
+        self.snapshot = snapshot
+        self.is_current = is_current
+
+        self.setObjectName("VersionNodeCurrent" if is_current else "VersionNode")
+        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        self.setFixedHeight(GraphMarker.MARKER_HEIGHT)
+
+        row_layout = QHBoxLayout(self)
+        row_layout.setContentsMargins(0, 0, 0, 0)
+        row_layout.setSpacing(8)
+
+        row_layout.addWidget(GraphMarker(is_first, is_last, is_current))
+
+        content = QWidget()
+        content.setObjectName("VersionContent")
+        content.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        content_layout = QVBoxLayout(content)
+        content_layout.setContentsMargins(16, 11, 16, 11)
+        content_layout.setSpacing(6)
+
+        top_row = QHBoxLayout()
+        top_row.setSpacing(12)
+
+        title = QLabel(f"{snapshot.id}  {snapshot.message}")
+        title.setObjectName("VersionTitle")
+
+        badge = QLabel("Current" if is_current else "Saved")
+        badge.setObjectName("CurrentBadge" if is_current else "PreviousBadge")
+        badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
+
+        switch_button = QPushButton("Current" if is_current else "Switch")
+        switch_button.setObjectName("SmallButton")
+        switch_button.setEnabled(not is_current)
+        switch_button.clicked.connect(self._request_switch)
+
+        top_row.addWidget(title, stretch=1)
+        top_row.addWidget(badge)
+        top_row.addWidget(switch_button)
+
+        details = QLabel(self._details_text())
+        details.setObjectName("VersionDetails")
+
+        content_layout.addLayout(top_row)
+        content_layout.addWidget(details)
+
+        row_layout.addWidget(content, stretch=1)
+
+    def _details_text(self):
+        text = snapshot_time = self.snapshot.timestamp
+
+        if self.snapshot.parent:
+            text = f"{snapshot_time}  |  parent: {self.snapshot.parent}"
+
+        return text
+
+    def _request_switch(self):
+        self.switch_requested.emit(self.snapshot.id)
+
+
+class VersionTimeline(QWidget):
+    """Vertical node-to-node version graph with per-version switch buttons."""
+
+    switch_requested = pyqtSignal(str)
+
+    def __init__(self):
+        super().__init__()
+        self.setObjectName("TimelineCanvas")
+        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        self.layout = QVBoxLayout(self)
+        self.layout.setContentsMargins(18, 16, 18, 16)
+        self.layout.setSpacing(0)
+
+    def set_versions(self, snapshots, current_snapshot_id):
+        self._clear()
+
+        if not snapshots:
+            empty = QLabel("No saved versions yet. Save your first version to start the history.")
+            empty.setObjectName("EmptyTimeline")
+            empty.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            empty.setMinimumHeight(180)
+            self.layout.addWidget(empty)
+            self.layout.addStretch(1)
             return
 
-        first_y = self._node_y(0)
-        last_y = self._node_y(len(self.snapshots) - 1)
+        newest_first = list(reversed(snapshots))
 
-        if len(self.snapshots) > 1:
-            painter.setPen(QPen(QColor("#8ca0b3"), 3))
-            painter.drawLine(self.GRAPH_X, first_y, self.GRAPH_X, last_y)
+        for index, snapshot in enumerate(newest_first):
+            node = VersionNode(
+                snapshot=snapshot,
+                is_first=index == 0,
+                is_last=index == len(newest_first) - 1,
+                is_current=snapshot.id == current_snapshot_id,
+            )
+            node.switch_requested.connect(self.switch_requested.emit)
+            self.layout.addWidget(node)
 
-        for row, snapshot in enumerate(self.snapshots):
-            self._draw_snapshot_row(painter, row, snapshot)
+        self.layout.addStretch(1)
 
-    def _draw_snapshot_row(self, painter, row, snapshot):
-        y = self._node_y(row)
-        row_top = self.TOP_PADDING + row * self.ROW_HEIGHT
-        is_current = snapshot.id == self.current_snapshot_id
-        is_selected = snapshot.id == self.selected_snapshot_id
+    def _clear(self):
+        while self.layout.count():
+            item = self.layout.takeAt(0)
+            widget = item.widget()
 
-        if is_selected:
-            painter.setPen(Qt.PenStyle.NoPen)
-            painter.setBrush(QColor("#edf4ff"))
-            painter.drawRoundedRect(10, row_top + 4, self.width() - 20, self.ROW_HEIGHT - 8, 8, 8)
-
-        node_color = QColor("#2166d1") if is_current else QColor("#6b7d90")
-        if is_selected:
-            node_color = QColor("#0f62fe")
-
-        painter.setPen(QPen(QColor("#ffffff"), 3))
-        painter.setBrush(node_color)
-        painter.drawEllipse(self.GRAPH_X - 8, y - 8, 16, 16)
-
-        text_x = self.GRAPH_X + 30
-
-        title_font = QFont()
-        title_font.setPointSize(10)
-        title_font.setBold(True)
-        painter.setFont(title_font)
-        painter.setPen(QColor("#17202a"))
-        painter.drawText(text_x, y - 8, f"{snapshot.id}  {snapshot.message}")
-
-        detail_font = QFont()
-        detail_font.setPointSize(9)
-        painter.setFont(detail_font)
-        painter.setPen(QColor("#667382"))
-
-        detail = snapshot.timestamp
-        if snapshot.parent:
-            detail += f"    parent: {snapshot.parent}"
-        if is_current:
-            detail += "    current"
-
-        painter.drawText(text_x, y + 16, detail)
-
-    def _node_y(self, row):
-        return self.TOP_PADDING + row * self.ROW_HEIGHT + self.ROW_HEIGHT // 2
+            if widget is not None:
+                widget.deleteLater()
 
 
 class SimpleGitWindow(QMainWindow):
-    """Main GUI window for the current SimpleGit core features."""
+    """Guided GUI for choosing a project, saving versions, and switching versions."""
 
     def __init__(self):
         super().__init__()
@@ -158,183 +203,305 @@ class SimpleGitWindow(QMainWindow):
         self.snapshot_manager = None
 
         self.setWindowTitle("SimpleGit")
-        self.resize(960, 620)
+        self.resize(980, 680)
 
-        self._build_ui()
+        self.views = QStackedWidget()
+        self.setCentralWidget(self.views)
+
+        self.start_view = self._build_start_view()
+        self.unmanaged_view = self._build_unmanaged_project_view()
+        self.managed_view = self._build_managed_project_view()
+
+        self.views.addWidget(self.start_view)
+        self.views.addWidget(self.unmanaged_view)
+        self.views.addWidget(self.managed_view)
+
         self._apply_styles()
-        self._set_actions_enabled(False)
+        self.show_start_view()
 
-    def _build_ui(self):
-        central_widget = QWidget()
-        self.setCentralWidget(central_widget)
-
-        root_layout = QVBoxLayout(central_widget)
-        root_layout.setContentsMargins(20, 18, 20, 18)
-        root_layout.setSpacing(14)
+    def _build_start_view(self):
+        page = QWidget()
+        layout = QVBoxLayout(page)
+        layout.setContentsMargins(36, 36, 36, 36)
+        layout.setSpacing(18)
+        layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
         title = QLabel("SimpleGit")
-        title.setObjectName("Title")
+        title.setObjectName("StartTitle")
+        title.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
-        subtitle = QLabel("Create and restore project snapshots")
-        subtitle.setObjectName("Subtitle")
+        subtitle = QLabel("Select a folder to start managing project versions.")
+        subtitle.setObjectName("StartSubtitle")
+        subtitle.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
-        root_layout.addWidget(title)
-        root_layout.addWidget(subtitle)
+        choose_button = QPushButton("Choose Project")
+        choose_button.setObjectName("PrimaryLargeButton")
+        choose_button.clicked.connect(self.choose_project)
 
-        root_layout.addWidget(self._build_project_box())
-        root_layout.addWidget(self._build_snapshot_box(), stretch=1)
+        layout.addStretch(1)
+        layout.addWidget(title)
+        layout.addWidget(subtitle)
+        layout.addSpacing(10)
+        layout.addWidget(choose_button, alignment=Qt.AlignmentFlag.AlignCenter)
+        layout.addStretch(1)
 
-        self.status_label = QLabel("Open a project folder to begin.")
-        self.status_label.setObjectName("Status")
-        root_layout.addWidget(self.status_label)
+        return page
 
-    def _build_project_box(self):
-        box = QGroupBox("Project")
-        layout = QGridLayout(box)
-        layout.setColumnStretch(1, 1)
+    def _build_unmanaged_project_view(self):
+        page = QWidget()
+        layout = QVBoxLayout(page)
+        layout.setContentsMargins(36, 36, 36, 36)
+        layout.setSpacing(18)
+        layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
-        path_label = QLabel("Folder")
-        self.project_path_input = QLineEdit()
-        self.project_path_input.setReadOnly(True)
-        self.project_path_input.setPlaceholderText("No project selected")
+        title = QLabel("Start Managing This Project")
+        title.setObjectName("PageTitle")
+        title.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
-        self.open_button = QPushButton("Open Project")
-        self.init_button = QPushButton("Initialize")
-        self.refresh_button = QPushButton("Refresh")
+        message = QLabel("This folder is not managed by SimpleGit yet.")
+        message.setObjectName("MutedText")
+        message.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
-        self.open_button.clicked.connect(self.open_project)
-        self.init_button.clicked.connect(self.initialize_repository)
-        self.refresh_button.clicked.connect(self.refresh_repository_view)
+        self.unmanaged_path_label = QLabel("")
+        self.unmanaged_path_label.setObjectName("PathText")
+        self.unmanaged_path_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
-        layout.addWidget(path_label, 0, 0)
-        layout.addWidget(self.project_path_input, 0, 1)
-        layout.addWidget(self.open_button, 0, 2)
-        layout.addWidget(self.init_button, 0, 3)
-        layout.addWidget(self.refresh_button, 0, 4)
+        start_button = QPushButton("Start Managing This Project")
+        start_button.setObjectName("PrimaryButton")
+        start_button.clicked.connect(self.start_managing_project)
 
-        self.current_snapshot_label = QLabel("Current snapshot: none")
-        self.current_snapshot_label.setObjectName("MutedText")
-        layout.addWidget(self.current_snapshot_label, 1, 1, 1, 4)
+        change_button = QPushButton("Choose Different Project")
+        change_button.setObjectName("SecondaryButton")
+        change_button.clicked.connect(self.choose_project)
 
-        return box
+        layout.addStretch(1)
+        layout.addWidget(title)
+        layout.addWidget(message)
+        layout.addWidget(self.unmanaged_path_label)
+        layout.addSpacing(10)
+        layout.addWidget(start_button, alignment=Qt.AlignmentFlag.AlignCenter)
+        layout.addWidget(change_button, alignment=Qt.AlignmentFlag.AlignCenter)
+        layout.addStretch(1)
 
-    def _build_snapshot_box(self):
-        box = QGroupBox("Snapshots")
-        layout = QVBoxLayout(box)
+        return page
 
-        create_row = QHBoxLayout()
+    def _build_managed_project_view(self):
+        page = QWidget()
+        layout = QVBoxLayout(page)
+        layout.setContentsMargins(28, 24, 28, 22)
+        layout.setSpacing(16)
+
+        header = QHBoxLayout()
+        header_text = QVBoxLayout()
+
+        self.project_name_label = QLabel("Project")
+        self.project_name_label.setObjectName("PageTitle")
+
+        self.project_path_label = QLabel("")
+        self.project_path_label.setObjectName("PathText")
+
+        self.current_version_label = QLabel("Current version: none")
+        self.current_version_label.setObjectName("MutedText")
+
+        header_text.addWidget(self.project_name_label)
+        header_text.addWidget(self.project_path_label)
+        header_text.addWidget(self.current_version_label)
+
+        change_button = QPushButton("Change Project")
+        change_button.setObjectName("SecondaryButton")
+        change_button.clicked.connect(self.choose_project)
+
+        header.addLayout(header_text, stretch=1)
+        header.addWidget(change_button, alignment=Qt.AlignmentFlag.AlignTop)
+        layout.addLayout(header)
+
+        save_panel = QFrame()
+        save_panel.setObjectName("Panel")
+        save_layout = QHBoxLayout(save_panel)
+        save_layout.setContentsMargins(16, 14, 16, 14)
+        save_layout.setSpacing(10)
+
         self.message_input = QLineEdit()
-        self.message_input.setPlaceholderText("Snapshot message")
+        self.message_input.setPlaceholderText("Short message for this version")
 
-        self.create_button = QPushButton("Create Snapshot")
-        self.restore_button = QPushButton("Restore Selected")
+        save_button = QPushButton("Save Version")
+        save_button.setObjectName("PrimaryButton")
+        save_button.clicked.connect(self.save_version)
 
-        self.create_button.clicked.connect(self.create_snapshot)
-        self.restore_button.clicked.connect(self.restore_selected_snapshot)
+        save_layout.addWidget(self.message_input, stretch=1)
+        save_layout.addWidget(save_button)
+        layout.addWidget(save_panel)
 
-        create_row.addWidget(self.message_input, stretch=1)
-        create_row.addWidget(self.create_button)
-        create_row.addWidget(self.restore_button)
-        layout.addLayout(create_row)
+        history_title = QLabel("Version History")
+        history_title.setObjectName("SectionTitle")
+        layout.addWidget(history_title)
 
-        line = QFrame()
-        line.setFrameShape(QFrame.Shape.HLine)
-        line.setFrameShadow(QFrame.Shadow.Sunken)
-        layout.addWidget(line)
+        self.version_timeline = VersionTimeline()
+        self.version_timeline.switch_requested.connect(self.switch_to_version)
 
-        timeline_label = QLabel("Timeline")
-        timeline_label.setObjectName("SectionLabel")
-        layout.addWidget(timeline_label)
+        scroll_area = QScrollArea()
+        scroll_area.setObjectName("TimelineScroll")
+        scroll_area.setWidgetResizable(True)
+        scroll_area.setFrameShape(QFrame.Shape.NoFrame)
+        scroll_area.viewport().setAutoFillBackground(True)
+        scroll_area.viewport().setStyleSheet("background: #ffffff;")
+        scroll_area.setWidget(self.version_timeline)
+        layout.addWidget(scroll_area, stretch=1)
 
-        self.timeline_graph = TimelineGraphWidget()
-        self.timeline_graph.snapshot_selected.connect(self._on_snapshot_selected)
+        self.status_label = QLabel("")
+        self.status_label.setObjectName("StatusText")
+        layout.addWidget(self.status_label)
 
-        timeline_scroll = QScrollArea()
-        timeline_scroll.setWidgetResizable(True)
-        timeline_scroll.setFrameShape(QFrame.Shape.NoFrame)
-        timeline_scroll.setWidget(self.timeline_graph)
-
-        layout.addWidget(timeline_scroll, stretch=1)
-
-        return box
+        return page
 
     def _apply_styles(self):
         self.setStyleSheet(
             """
             QMainWindow {
-                background: #f6f7f9;
+                background: #f5f7fa;
             }
-            QLabel#Title {
-                color: #17202a;
+            QLabel#StartTitle {
+                color: #111827;
+                font-size: 42px;
+                font-weight: 800;
+            }
+            QLabel#StartSubtitle {
+                color: #5f6b7a;
+                font-size: 15px;
+            }
+            QLabel#PageTitle {
+                color: #111827;
                 font-size: 28px;
-                font-weight: 700;
+                font-weight: 800;
             }
-            QLabel#Subtitle {
-                color: #5d6975;
+            QLabel#SectionTitle {
+                color: #1f2937;
+                font-size: 16px;
+                font-weight: 800;
+                margin-top: 4px;
+            }
+            QLabel#MutedText,
+            QLabel#StatusText {
+                color: #607082;
                 font-size: 13px;
-                margin-bottom: 4px;
             }
-            QLabel#Status,
-            QLabel#MutedText {
-                color: #5d6975;
-            }
-            QLabel#SectionLabel {
-                color: #394653;
+            QLabel#PathText {
+                color: #435366;
                 font-size: 13px;
-                font-weight: 700;
-                margin-top: 6px;
             }
-            QGroupBox {
-                background: #ffffff;
-                border: 1px solid #d9dee5;
-                border-radius: 8px;
+            QLabel#VersionTitle {
                 color: #17202a;
-                font-weight: 600;
-                margin-top: 12px;
-                padding: 14px 12px 12px 12px;
+                font-size: 14px;
+                font-weight: 800;
             }
-            QGroupBox::title {
-                subcontrol-origin: margin;
-                left: 12px;
-                padding: 0 4px;
+            QLabel#VersionDetails {
+                color: #667382;
+                font-size: 12px;
+            }
+            QLabel#CurrentBadge,
+            QLabel#PreviousBadge {
+                border-radius: 10px;
+                font-size: 11px;
+                font-weight: 700;
+                padding: 4px 9px;
+            }
+            QLabel#CurrentBadge {
+                background: #dbeafe;
+                color: #1d4ed8;
+            }
+            QLabel#PreviousBadge {
+                background: #eef2f7;
+                color: #475569;
+            }
+            QLabel#EmptyTimeline {
+                color: #7b8794;
+                font-size: 14px;
+            }
+            QFrame#Panel,
+            QWidget#TimelineCanvas {
+                background: #ffffff;
+                border: 1px solid #dbe2ea;
+                border-radius: 8px;
+            }
+            QWidget#TimelineCanvas {
+                border: none;
+            }
+            QWidget#VersionNode,
+            QWidget#VersionNodeCurrent {
+                background: transparent;
+                border: none;
+            }
+            QWidget#VersionNodeCurrent {
+                background: transparent;
+            }
+            QWidget#VersionContent {
+                background: #ffffff;
+                border: 1px solid #dbe2ea;
+                border-radius: 8px;
+            }
+            QWidget#VersionNodeCurrent QWidget#VersionContent {
+                background: #f8fbff;
+                border: 1px solid #93c5fd;
             }
             QLineEdit {
                 background: #ffffff;
-                border: 1px solid #cfd6df;
-                border-radius: 6px;
-                padding: 8px 10px;
+                border: 1px solid #cfd8e3;
+                border-radius: 7px;
                 color: #17202a;
-            }
-            QLineEdit:read-only {
-                background: #f4f6f8;
-                color: #45515e;
+                padding: 10px 12px;
             }
             QPushButton {
+                border-radius: 7px;
+                font-weight: 700;
+                padding: 10px 14px;
+            }
+            QPushButton#PrimaryLargeButton {
                 background: #2166d1;
-                border: 1px solid #1c5dbf;
-                border-radius: 6px;
+                border: 1px solid #1d5fc3;
                 color: #ffffff;
-                font-weight: 600;
-                padding: 8px 12px;
+                font-size: 18px;
+                min-width: 230px;
+                padding: 16px 22px;
+            }
+            QPushButton#PrimaryButton,
+            QPushButton {
+                background: #2166d1;
+                border: 1px solid #1d5fc3;
+                color: #ffffff;
+            }
+            QPushButton#SecondaryButton {
+                background: #ffffff;
+                border: 1px solid #cfd8e3;
+                color: #304155;
+            }
+            QPushButton#SmallButton {
+                min-width: 86px;
+                padding: 7px 12px;
             }
             QPushButton:hover {
-                background: #1c5dbf;
+                background: #1d5fc3;
+            }
+            QPushButton#SecondaryButton:hover {
+                background: #eef4fb;
             }
             QPushButton:disabled {
-                background: #d8dee6;
-                border-color: #d8dee6;
+                background: #e5eaf0;
+                border-color: #d8e0e8;
                 color: #7b8794;
             }
-            QScrollArea {
+            QScrollArea#TimelineScroll {
                 background: #ffffff;
-                border: 1px solid #d9dee5;
-                border-radius: 6px;
+                border: 1px solid #dbe2ea;
+                border-radius: 8px;
             }
             """
         )
 
-    def open_project(self):
-        selected_folder = QFileDialog.getExistingDirectory(self, "Open Project Folder")
+    def show_start_view(self):
+        self.views.setCurrentWidget(self.start_view)
+
+    def choose_project(self):
+        selected_folder = QFileDialog.getExistingDirectory(self, "Choose Project Folder")
 
         if not selected_folder:
             return
@@ -342,27 +509,44 @@ class SimpleGitWindow(QMainWindow):
         self.project_path = Path(selected_folder)
         self.repository = Repository(self.project_path)
         self.snapshot_manager = SnapshotManager(self.repository.repo_path)
-        self.project_path_input.setText(str(self.project_path))
-        self.refresh_repository_view()
+        self.show_project_state()
 
-    def initialize_repository(self):
-        if not self._has_project():
+    def show_project_state(self):
+        if self.repository.is_repository():
+            self.show_managed_project_view()
+        else:
+            self.show_unmanaged_project_view()
+
+    def show_unmanaged_project_view(self):
+        self.unmanaged_path_label.setText(str(self.project_path))
+        self.views.setCurrentWidget(self.unmanaged_view)
+
+    def start_managing_project(self):
+        if self.repository is None:
+            self.show_start_view()
             return
 
         try:
             self.repository.initialize()
-            self.refresh_repository_view()
-            QMessageBox.information(self, "Repository", "SimpleGit repository is ready.")
+            self.show_managed_project_view()
+            self.status_label.setText("Project is now managed by SimpleGit.")
         except Exception as error:
-            QMessageBox.critical(self, "Initialize Failed", str(error))
+            QMessageBox.critical(self, "Could Not Start", str(error))
 
-    def create_snapshot(self):
-        if not self._has_repository():
+    def show_managed_project_view(self):
+        self.project_name_label.setText(self.project_path.name)
+        self.project_path_label.setText(str(self.project_path))
+        self.views.setCurrentWidget(self.managed_view)
+        self.refresh_versions()
+
+    def save_version(self):
+        if not self._has_managed_project():
             return
 
         message = self.message_input.text().strip()
+
         if not message:
-            QMessageBox.warning(self, "Missing Message", "Please enter a snapshot message.")
+            QMessageBox.warning(self, "Message Needed", "Write a short message for this version.")
             return
 
         try:
@@ -372,24 +556,24 @@ class SimpleGitWindow(QMainWindow):
                 self.file_manager,
             )
             self.message_input.clear()
-            self.refresh_repository_view()
-            self.status_label.setText(f"Created snapshot {snapshot.id}.")
+            self.refresh_versions()
+            self.status_label.setText(f"Saved version {snapshot.id}.")
         except Exception as error:
-            QMessageBox.critical(self, "Snapshot Failed", str(error))
+            QMessageBox.critical(self, "Could Not Save Version", str(error))
 
-    def restore_selected_snapshot(self):
-        if not self._has_repository():
+    def switch_to_version(self, snapshot_id):
+        if not self._has_managed_project():
             return
 
-        snapshot_id = self._selected_snapshot_id()
-        if snapshot_id is None:
-            QMessageBox.warning(self, "No Snapshot Selected", "Please select a snapshot first.")
+        current_snapshot = self._read_current_snapshot()
+        if snapshot_id == current_snapshot:
+            self.status_label.setText(f"{snapshot_id} is already the current version.")
             return
 
         response = QMessageBox.question(
             self,
-            "Restore Snapshot",
-            f"Restore {snapshot_id}? Current project files will be replaced.",
+            "Switch Version",
+            f"Switch to {snapshot_id}? Current project files will be replaced.",
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
         )
 
@@ -402,39 +586,26 @@ class SimpleGitWindow(QMainWindow):
                 self.repository.project_path,
                 self.file_manager,
             )
-            self.refresh_repository_view()
-            self.status_label.setText(f"Restored snapshot {snapshot.id}.")
+            self.refresh_versions()
+            self.status_label.setText(f"Switched to version {snapshot.id}.")
         except Exception as error:
-            QMessageBox.critical(self, "Restore Failed", str(error))
+            QMessageBox.critical(self, "Could Not Switch Version", str(error))
 
-    def refresh_repository_view(self):
-        if not self._has_project(show_message=False):
-            self._set_actions_enabled(False)
-            return
-
-        repository_exists = self.repository.is_repository()
-        self.init_button.setEnabled(not repository_exists)
-        self.refresh_button.setEnabled(repository_exists)
-        self.create_button.setEnabled(repository_exists)
-        self.restore_button.setEnabled(repository_exists)
-
-        if not repository_exists:
-            self.timeline_graph.set_snapshots([], None)
-            self.current_snapshot_label.setText("Current snapshot: none")
-            self.status_label.setText("Project selected. Initialize it to start using SimpleGit.")
+    def refresh_versions(self):
+        if not self._has_managed_project(show_message=False):
             return
 
         current_snapshot = self._read_current_snapshot()
-        self._load_snapshots_into_graph(current_snapshot)
-        self.current_snapshot_label.setText(f"Current snapshot: {current_snapshot or 'none'}")
-        self.status_label.setText("Repository loaded.")
-
-    def _load_snapshots_into_graph(self, current_snapshot):
         snapshots = self.snapshot_manager.get_all_snapshots()
-        self.timeline_graph.set_snapshots(snapshots, current_snapshot)
+
+        self.current_version_label.setText(f"Current version: {current_snapshot or 'none'}")
+        self.version_timeline.set_versions(snapshots, current_snapshot)
+
+        if not snapshots:
+            self.status_label.setText("Save your first version when the project is ready.")
 
     def _read_current_snapshot(self):
-        if not self.repository.head_file.exists():
+        if self.repository is None or not self.repository.head_file.exists():
             return None
 
         try:
@@ -444,35 +615,13 @@ class SimpleGitWindow(QMainWindow):
         except (json.JSONDecodeError, OSError):
             return None
 
-    def _selected_snapshot_id(self):
-        return self.timeline_graph.selected_snapshot_id
+    def _has_managed_project(self, show_message=True):
+        is_ready = self.repository is not None and self.repository.is_repository()
 
-    def _on_snapshot_selected(self, snapshot_id):
-        self.status_label.setText(f"Selected snapshot {snapshot_id}.")
+        if not is_ready and show_message:
+            QMessageBox.warning(self, "Choose Project", "Choose and start managing a project first.")
 
-    def _has_project(self, show_message=True):
-        has_project = self.repository is not None and self.project_path is not None
-
-        if not has_project and show_message:
-            QMessageBox.warning(self, "No Project", "Please open a project folder first.")
-
-        return has_project
-
-    def _has_repository(self):
-        if not self._has_project():
-            return False
-
-        if not self.repository.is_repository():
-            QMessageBox.warning(self, "Not Initialized", "Please initialize this project first.")
-            return False
-
-        return True
-
-    def _set_actions_enabled(self, enabled):
-        self.init_button.setEnabled(enabled)
-        self.refresh_button.setEnabled(enabled)
-        self.create_button.setEnabled(enabled)
-        self.restore_button.setEnabled(enabled)
+        return is_ready
 
 
 def main():
