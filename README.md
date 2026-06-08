@@ -21,6 +21,107 @@ Instead, it is a learning-focused snapshot management system.
 
 ---
 
+# OOP Lab Justification
+
+SimpleGit was designed as a 3-person OOP lab project with separate responsibilities for core logic, GUI interaction, and release/documentation work. The project demonstrates object-oriented design by splitting the application into focused classes instead of placing all behavior in one file.
+
+## OOP Concepts Used
+
+| OOP Concept | How SimpleGit Uses It |
+|---|---|
+| Classes and Objects | `Repository`, `Snapshot`, `SnapshotManager`, `FileManager`, and GUI widgets model different parts of the system. |
+| Encapsulation | File copying, restoring, and ignore-rule handling are hidden inside `FileManager`. Snapshot operations are handled inside `SnapshotManager`. |
+| Abstraction | The GUI calls simple methods such as `initialize()`, `create_snapshot()`, and `restore_snapshot()` without needing to know every file-system detail. |
+| Composition | `SimpleGitWindow` uses `Repository`, `SnapshotManager`, and `FileManager` objects together to provide the full workflow. |
+| Separation of Concerns | Core version-control logic is kept in `core/`, while PyQt6 interface code is kept in `gui/`. |
+| Data Modeling | The `Snapshot` dataclass represents each saved version with an ID, message, timestamp, and parent snapshot. |
+
+## 3-Person Team Contribution Split
+
+| Team Member | Main Responsibility | Related Files |
+|---|---|---|
+| Ali Raza Khalid | Snapshot system, GUI application, and executable build setup. | `core/snapshot.py`, `gui/window.py`, `main.py`, `build.ps1`, `requirements.txt` |
+| Fiza Batool | File manager logic and project documentation. | `core/file_manager.py`, `README.md`, `GUIDE.md` |
+| Mahnoor Ali | Repository class and website. | `core/repository.py`, `docs/` |
+
+## Class Diagram
+
+```mermaid
+classDiagram
+    class SimpleGitWindow {
+        +choose_project()
+        +start_managing_project()
+        +save_version()
+        +switch_to_version(snapshot_id)
+        +move_backward()
+        +move_forward()
+    }
+
+    class Repository {
+        +project_path
+        +repo_path
+        +initialize()
+        +load()
+        +is_repository()
+    }
+
+    class SnapshotManager {
+        +repo_path
+        +create_snapshot(message, project_dir, file_manager)
+        +restore_snapshot(snapshot_id, project_dir, file_manager)
+        +get_snapshot(snapshot_id)
+        +get_all_snapshots()
+        +get_previous_snapshot_id()
+        +get_next_snapshot_id()
+    }
+
+    class FileManager {
+        +copy_project_files(project_dir, files_path)
+        +restore_files(snapshot_files, project_dir)
+        +delete_working_files(project_dir)
+        +load_ignore_rules(project_dir)
+        +should_ignore(relative_path, ignore_rules)
+    }
+
+    class Snapshot {
+        +id
+        +message
+        +timestamp
+        +parent
+        +to_dict()
+        +from_dict(data)
+    }
+
+    SimpleGitWindow --> Repository
+    SimpleGitWindow --> SnapshotManager
+    SimpleGitWindow --> FileManager
+    SnapshotManager --> Snapshot
+    SnapshotManager --> FileManager
+    Repository --> FileManager
+```
+
+## Application Flow
+
+```mermaid
+flowchart TD
+    A["Open SimpleGit"] --> B["Choose project folder"]
+    B --> C{"Is .simplegit present?"}
+    C -- "No" --> D["Initialize repository"]
+    C -- "Yes" --> E["Load existing repository"]
+    D --> F["Show managed project view"]
+    E --> F
+    F --> G["Enter snapshot message"]
+    G --> H["Save version"]
+    H --> I["Copy project files into snapshot folder"]
+    I --> J["Save metadata and update HEAD"]
+    J --> K["Show updated timeline"]
+    K --> L["Switch, Back, or Forward to another version"]
+    L --> M["Restore selected snapshot"]
+    M --> K
+```
+
+---
+
 # Screenshots
 
 ## Main Dashboard
@@ -44,8 +145,11 @@ Instead, it is a learning-focused snapshot management system.
 - Timeline/history viewing
 - GUI interaction using PyQt6
 - Snapshot restoration
+- Changed-file summary after each saved snapshot
+- Project stats cards for saved versions, current version, and ignored rules
+- About dialog with project purpose and team responsibilities
 - Windows executable build using PyInstaller
-- Static download website in `website/`
+- Static download website in `docs/`
 
 ---
 
@@ -70,7 +174,7 @@ The project includes `build.ps1`, which:
 - installs requirements
 - creates `assets/icon.ico` from `icon.png`
 - builds `dist/SimpleGit.exe`
-- copies the executable to `website/downloads/SimpleGit.exe`
+- prepares the Windows executable for release
 
 Run:
 
@@ -81,7 +185,7 @@ Run:
 The website can be opened at:
 
 ```txt
-website/index.html
+docs/index.html
 ```
 
 ---

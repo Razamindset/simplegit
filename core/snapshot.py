@@ -3,6 +3,7 @@ from datetime import datetime
 from typing import Optional
 from pathlib import Path
 import json 
+import hashlib
 
 @dataclass
 class Snapshot:
@@ -223,6 +224,41 @@ class SnapshotManager:
             return None
 
         return snapshot_ids[current_index + 1]
+
+    def get_changed_files(self, project_dir: Path, file_manager) -> dict[str, list[str]]:
+        """
+        Compare the working folder with the current snapshot.
+
+        Returns added, modified, and deleted file paths. For the first snapshot,
+        all tracked files are reported as added.
+        """
+        project_dir = Path(project_dir)
+        current_snapshot = self._get_current_snapshot()
+        current_files = self._collect_project_files(project_dir, file_manager)
+
+        if current_snapshot is None:
+            return {
+                "added": sorted(current_files),
+                "modified": [],
+                "deleted": [],
+            }
+
+        snapshot_files_dir = self.snapshots_dir / current_snapshot.id / "files"
+        snapshot_files = self._collect_snapshot_files(snapshot_files_dir)
+
+        added = sorted(set(current_files) - set(snapshot_files))
+        deleted = sorted(set(snapshot_files) - set(current_files))
+        modified = sorted(
+            file_path
+            for file_path in set(current_files) & set(snapshot_files)
+            if current_files[file_path] != snapshot_files[file_path]
+        )
+
+        return {
+            "added": added,
+            "modified": modified,
+            "deleted": deleted,
+        }
     
 
     def _generate_snap_id(self) -> str:
@@ -245,6 +281,45 @@ class SnapshotManager:
             return int(snapshot.id), snapshot.id
 
         return 0, snapshot.id
+
+    def _collect_project_files(self, project_dir: Path, file_manager) -> dict[str, str]:
+        project_dir = Path(project_dir)
+        ignore_rules = file_manager.load_ignore_rules(project_dir)
+        files = {}
+
+        for item in project_dir.rglob("*"):
+            relative_path = item.relative_to(project_dir)
+
+            if not item.is_file() or file_manager.should_ignore(relative_path, ignore_rules):
+                continue
+
+            files[relative_path.as_posix()] = self._hash_file(item)
+
+        return files
+
+    def _collect_snapshot_files(self, snapshot_files_dir: Path) -> dict[str, str]:
+        snapshot_files_dir = Path(snapshot_files_dir)
+        files = {}
+
+        if not snapshot_files_dir.exists():
+            return files
+
+        for item in snapshot_files_dir.rglob("*"):
+            if not item.is_file():
+                continue
+
+            files[item.relative_to(snapshot_files_dir).as_posix()] = self._hash_file(item)
+
+        return files
+
+    def _hash_file(self, file_path: Path) -> str:
+        digest = hashlib.sha256()
+
+        with open(file_path, "rb") as file:
+            for chunk in iter(lambda: file.read(1024 * 1024), b""):
+                digest.update(chunk)
+
+        return digest.hexdigest()
 
     def _ensure_repository_files(self) -> None:
         """

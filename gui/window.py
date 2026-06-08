@@ -324,11 +324,28 @@ class SimpleGitWindow(QMainWindow):
         self.forward_button.setObjectName("SecondaryButton")
         self.forward_button.clicked.connect(self.move_forward)
 
+        about_button = QPushButton("About")
+        about_button.setObjectName("SecondaryButton")
+        about_button.clicked.connect(self.show_about_project)
+
         header.addLayout(header_text, stretch=1)
         header.addWidget(self.back_button, alignment=Qt.AlignmentFlag.AlignTop)
         header.addWidget(self.forward_button, alignment=Qt.AlignmentFlag.AlignTop)
         header.addWidget(change_button, alignment=Qt.AlignmentFlag.AlignTop)
+        header.addWidget(about_button, alignment=Qt.AlignmentFlag.AlignTop)
         layout.addLayout(header)
+
+        stats_row = QHBoxLayout()
+        stats_row.setSpacing(12)
+
+        self.saved_versions_stat = self._build_stat_card("Saved Versions", "0")
+        self.current_version_stat = self._build_stat_card("Current Version", "None")
+        self.ignore_rules_stat = self._build_stat_card("Ignored Rules", "0")
+
+        stats_row.addWidget(self.saved_versions_stat)
+        stats_row.addWidget(self.current_version_stat)
+        stats_row.addWidget(self.ignore_rules_stat)
+        layout.addLayout(stats_row)
 
         save_panel = QFrame()
         save_panel.setObjectName("Panel")
@@ -346,6 +363,23 @@ class SimpleGitWindow(QMainWindow):
         save_layout.addWidget(self.message_input, stretch=1)
         save_layout.addWidget(save_button)
         layout.addWidget(save_panel)
+
+        self.changes_panel = QFrame()
+        self.changes_panel.setObjectName("ChangesPanel")
+        changes_layout = QVBoxLayout(self.changes_panel)
+        changes_layout.setContentsMargins(16, 14, 16, 14)
+        changes_layout.setSpacing(6)
+
+        changes_title = QLabel("Last Saved Changes")
+        changes_title.setObjectName("SectionTitle")
+
+        self.changes_label = QLabel("Save a version to see which files changed.")
+        self.changes_label.setObjectName("ChangesText")
+        self.changes_label.setWordWrap(True)
+
+        changes_layout.addWidget(changes_title)
+        changes_layout.addWidget(self.changes_label)
+        layout.addWidget(self.changes_panel)
 
         history_title = QLabel("Version History")
         history_title.setObjectName("SectionTitle")
@@ -368,6 +402,27 @@ class SimpleGitWindow(QMainWindow):
         layout.addWidget(self.status_label)
 
         return page
+
+    def _build_stat_card(self, label_text, value_text):
+        card = QFrame()
+        card.setObjectName("StatCard")
+        card.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+
+        layout = QVBoxLayout(card)
+        layout.setContentsMargins(14, 12, 14, 12)
+        layout.setSpacing(4)
+
+        label = QLabel(label_text)
+        label.setObjectName("StatLabel")
+
+        value = QLabel(value_text)
+        value.setObjectName("StatValue")
+
+        layout.addWidget(label)
+        layout.addWidget(value)
+
+        card.value_label = value
+        return card
 
     def _apply_styles(self):
         self.setStyleSheet(
@@ -413,6 +468,22 @@ class SimpleGitWindow(QMainWindow):
                 color: #667382;
                 font-size: 12px;
             }
+            QLabel#StatLabel {
+                color: #6b7787;
+                font-size: 11px;
+                font-weight: 800;
+                text-transform: uppercase;
+            }
+            QLabel#StatValue {
+                color: #17202a;
+                font-size: 20px;
+                font-weight: 900;
+            }
+            QLabel#ChangesText {
+                color: #435366;
+                font-size: 13px;
+                line-height: 1.4;
+            }
             QLabel#CurrentBadge,
             QLabel#PreviousBadge {
                 border-radius: 10px;
@@ -433,10 +504,18 @@ class SimpleGitWindow(QMainWindow):
                 font-size: 14px;
             }
             QFrame#Panel,
+            QFrame#ChangesPanel,
+            QFrame#StatCard,
             QWidget#TimelineCanvas {
                 background: #ffffff;
                 border: 1px solid #dbe2ea;
                 border-radius: 8px;
+            }
+            QFrame#ChangesPanel {
+                background: #fbfdff;
+            }
+            QFrame#StatCard {
+                background: #ffffff;
             }
             QWidget#TimelineCanvas {
                 border: none;
@@ -565,6 +644,10 @@ class SimpleGitWindow(QMainWindow):
             return
 
         try:
+            changed_files = self.snapshot_manager.get_changed_files(
+                self.repository.project_path,
+                self.file_manager,
+            )
             snapshot = self.snapshot_manager.create_snapshot(
                 message,
                 self.repository.project_path,
@@ -572,6 +655,7 @@ class SimpleGitWindow(QMainWindow):
             )
             self.message_input.clear()
             self.refresh_versions()
+            self.show_changed_files(changed_files)
             self.status_label.setText(f"Saved version {snapshot.id}.")
         except Exception as error:
             QMessageBox.critical(self, "Could Not Save Version", str(error))
@@ -605,6 +689,24 @@ class SimpleGitWindow(QMainWindow):
             self.status_label.setText(f"Switched to version {snapshot.id}.")
         except Exception as error:
             QMessageBox.critical(self, "Could Not Switch Version", str(error))
+
+    def show_about_project(self):
+        QMessageBox.information(
+            self,
+            "About SimpleGit",
+            (
+                "SimpleGit v1.0.0\n\n"
+                "A beginner-friendly desktop version control app for saving "
+                "project snapshots and restoring earlier versions.\n\n"
+                "OOP Concepts: classes, encapsulation, abstraction, composition, "
+                "and separation of concerns.\n\n"
+                "Contributors:\n"
+                "- Ali Raza Khalid: snapshot system, GUI, build\n"
+                "- Fiza Batool: file manager, documentation\n"
+                "- Mahnoor Ali: repository class, website\n\n"
+                "GitHub: https://github.com/Razamindset/simplegit"
+            ),
+        )
 
     def move_backward(self):
         self._move_to_neighbor_version(
@@ -646,6 +748,11 @@ class SimpleGitWindow(QMainWindow):
         has_current_snapshot = current_snapshot is not None
 
         self.current_version_label.setText(f"Current version: {current_snapshot or 'none'}")
+        self.saved_versions_stat.value_label.setText(str(len(snapshots)))
+        self.current_version_stat.value_label.setText(current_snapshot or "None")
+        self.ignore_rules_stat.value_label.setText(
+            str(len(self.file_manager.load_ignore_rules(self.repository.project_path)))
+        )
         self.version_timeline.set_versions(snapshots, current_snapshot)
         self.back_button.setEnabled(
             has_current_snapshot and self.snapshot_manager.get_previous_snapshot_id() is not None
@@ -656,6 +763,29 @@ class SimpleGitWindow(QMainWindow):
 
         if not snapshots:
             self.status_label.setText("Save your first version when the project is ready.")
+
+    def show_changed_files(self, changed_files):
+        total_changes = sum(len(files) for files in changed_files.values())
+
+        if total_changes == 0:
+            self.changes_label.setText("No file content changes were detected for this snapshot.")
+            return
+
+        lines = []
+
+        for label, key in (("Added", "added"), ("Modified", "modified"), ("Deleted", "deleted")):
+            files = changed_files.get(key, [])
+
+            if not files:
+                continue
+
+            preview_files = files[:8]
+            lines.append(f"{label} ({len(files)}): " + ", ".join(preview_files))
+
+            if len(files) > len(preview_files):
+                lines.append(f"...and {len(files) - len(preview_files)} more {label.lower()} files.")
+
+        self.changes_label.setText("\n".join(lines))
 
     def _read_current_snapshot(self):
         if self.repository is None or not self.repository.head_file.exists():
