@@ -6,6 +6,43 @@ A lightweight educational version control system built with Python and PyQt6.
 Website Link: [https://razamindset.github.io/simplegit](https://razamindset.github.io/simplegit)
 ---
 
+# Quick Start
+
+Follow these steps to run SimpleGit locally.
+
+## 1. Clone The Repository
+
+```powershell
+git clone https://github.com/Razamindset/simplegit.git
+cd simplegit
+```
+
+## 2. Install Dependencies
+
+```powershell
+python -m pip install -r requirements.txt
+```
+
+## 3. Run The Desktop App
+
+```powershell
+python main.py
+```
+
+## 4. Use The App
+
+1. Click `Choose Project`.
+2. Select a small test folder.
+3. If the folder is not managed yet, click `Start Managing This Project`.
+4. Type a snapshot message.
+5. Click `Save Version`.
+6. Change or add files in the selected folder.
+7. Save another version, then use the timeline, `Back`, or `Forward` buttons to switch versions.
+
+Important: restoring a snapshot replaces the current files in the selected project folder, so test with a safe folder first.
+
+---
+
 # Project Overview
 
 SimpleGit is a simplified graphical version control system inspired by Git.
