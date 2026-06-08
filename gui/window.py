@@ -9,7 +9,7 @@ if str(PROJECT_ROOT) not in sys.path:
 
 try:
     from PyQt6.QtCore import Qt, pyqtSignal
-    from PyQt6.QtGui import QColor, QPainter, QPen
+    from PyQt6.QtGui import QColor, QIcon, QPainter, QPen
     from PyQt6.QtWidgets import (
         QApplication,
         QFileDialog,
@@ -31,6 +31,8 @@ except ModuleNotFoundError as error:
 from core.file_manager import FileManager
 from core.repository import Repository
 from core.snapshot import SnapshotManager
+
+APP_ICON_PATH = PROJECT_ROOT / "icon.png"
 
 
 class GraphMarker(QWidget):
@@ -205,6 +207,9 @@ class SimpleGitWindow(QMainWindow):
         self.setWindowTitle("SimpleGit")
         self.resize(980, 680)
 
+        if APP_ICON_PATH.exists():
+            self.setWindowIcon(QIcon(str(APP_ICON_PATH)))
+
         self.views = QStackedWidget()
         self.setCentralWidget(self.views)
 
@@ -311,7 +316,17 @@ class SimpleGitWindow(QMainWindow):
         change_button.setObjectName("SecondaryButton")
         change_button.clicked.connect(self.choose_project)
 
+        self.back_button = QPushButton("Back")
+        self.back_button.setObjectName("SecondaryButton")
+        self.back_button.clicked.connect(self.move_backward)
+
+        self.forward_button = QPushButton("Forward")
+        self.forward_button.setObjectName("SecondaryButton")
+        self.forward_button.clicked.connect(self.move_forward)
+
         header.addLayout(header_text, stretch=1)
+        header.addWidget(self.back_button, alignment=Qt.AlignmentFlag.AlignTop)
+        header.addWidget(self.forward_button, alignment=Qt.AlignmentFlag.AlignTop)
         header.addWidget(change_button, alignment=Qt.AlignmentFlag.AlignTop)
         layout.addLayout(header)
 
@@ -591,15 +606,53 @@ class SimpleGitWindow(QMainWindow):
         except Exception as error:
             QMessageBox.critical(self, "Could Not Switch Version", str(error))
 
+    def move_backward(self):
+        self._move_to_neighbor_version(
+            self.snapshot_manager.get_previous_snapshot_id(),
+            "No older saved version is available.",
+        )
+
+    def move_forward(self):
+        self._move_to_neighbor_version(
+            self.snapshot_manager.get_next_snapshot_id(),
+            "No newer saved version is available.",
+        )
+
+    def _move_to_neighbor_version(self, snapshot_id, empty_message):
+        if not self._has_managed_project():
+            return
+
+        if snapshot_id is None:
+            self.status_label.setText(empty_message)
+            return
+
+        try:
+            snapshot = self.snapshot_manager.restore_snapshot(
+                snapshot_id,
+                self.repository.project_path,
+                self.file_manager,
+            )
+            self.refresh_versions()
+            self.status_label.setText(f"Switched to version {snapshot.id}.")
+        except Exception as error:
+            QMessageBox.critical(self, "Could Not Switch Version", str(error))
+
     def refresh_versions(self):
         if not self._has_managed_project(show_message=False):
             return
 
         current_snapshot = self._read_current_snapshot()
         snapshots = self.snapshot_manager.get_all_snapshots()
+        has_current_snapshot = current_snapshot is not None
 
         self.current_version_label.setText(f"Current version: {current_snapshot or 'none'}")
         self.version_timeline.set_versions(snapshots, current_snapshot)
+        self.back_button.setEnabled(
+            has_current_snapshot and self.snapshot_manager.get_previous_snapshot_id() is not None
+        )
+        self.forward_button.setEnabled(
+            has_current_snapshot and self.snapshot_manager.get_next_snapshot_id() is not None
+        )
 
         if not snapshots:
             self.status_label.setText("Save your first version when the project is ready.")

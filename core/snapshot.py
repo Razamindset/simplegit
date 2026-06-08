@@ -182,7 +182,47 @@ class SnapshotManager:
                 if snapshot:
                     snapshots.append(snapshot)
 
-        return snapshots
+        return sorted(snapshots, key=self._snapshot_sort_key)
+
+    def get_previous_snapshot_id(self) -> Optional[str]:
+        """Return the snapshot before HEAD, if one exists."""
+        snapshots = self.get_all_snapshots()
+        current_snapshot = self._get_current_snapshot()
+
+        if not snapshots or current_snapshot is None:
+            return None
+
+        snapshot_ids = [snapshot.id for snapshot in snapshots]
+
+        if current_snapshot.id not in snapshot_ids:
+            return None
+
+        current_index = snapshot_ids.index(current_snapshot.id)
+
+        if current_index == 0:
+            return None
+
+        return snapshot_ids[current_index - 1]
+
+    def get_next_snapshot_id(self) -> Optional[str]:
+        """Return the snapshot after HEAD, if one exists."""
+        snapshots = self.get_all_snapshots()
+        current_snapshot = self._get_current_snapshot()
+
+        if not snapshots or current_snapshot is None:
+            return None
+
+        snapshot_ids = [snapshot.id for snapshot in snapshots]
+
+        if current_snapshot.id not in snapshot_ids:
+            return None
+
+        current_index = snapshot_ids.index(current_snapshot.id)
+
+        if current_index >= len(snapshot_ids) - 1:
+            return None
+
+        return snapshot_ids[current_index + 1]
     
 
     def _generate_snap_id(self) -> str:
@@ -196,6 +236,15 @@ class SnapshotManager:
                 largest_number = max(largest_number, int(snapshot.id))
 
         return f"s{largest_number + 1}"
+
+    def _snapshot_sort_key(self, snapshot: Snapshot) -> tuple[int, str]:
+        if snapshot.id.startswith("s") and snapshot.id[1:].isdigit():
+            return int(snapshot.id[1:]), snapshot.id
+
+        if snapshot.id.isdigit():
+            return int(snapshot.id), snapshot.id
+
+        return 0, snapshot.id
 
     def _ensure_repository_files(self) -> None:
         """

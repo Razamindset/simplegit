@@ -32,6 +32,45 @@ Instead, it is a learning-focused snapshot management system.
 - Timeline/history viewing
 - GUI interaction using PyQt6
 - Snapshot restoration
+- Windows executable build using PyInstaller
+- Static download website in `website/`
+
+---
+
+# Run The App
+
+```powershell
+python main.py
+```
+
+If dependencies are missing:
+
+```powershell
+python -m pip install -r requirements.txt
+```
+
+---
+
+# Build A Shareable Windows EXE
+
+The project includes `build.ps1`, which:
+
+- installs requirements
+- creates `assets/icon.ico` from `icon.png`
+- builds `dist/SimpleGit.exe`
+- copies the executable to `website/downloads/SimpleGit.exe`
+
+Run:
+
+```powershell
+.\build.ps1
+```
+
+The website can be opened at:
+
+```txt
+website/index.html
+```
 
 ---
 

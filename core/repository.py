@@ -81,6 +81,11 @@ class Repository:
         default_ignore = [
             "__pycache__",
             ".venv",
+            "venv",
+            "node_modules",
+            ".git",
+            ".idea",
+            ".vscode",
             "dist",
             "build"
         ]
